@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: 220 18% 12%;
+  --surface-muted: 220 14% 18%;
+  --ink: 0 0% 98%;
+  --ink-muted: 220 10% 60%;
+  --accent: 162 63% 41%;
+  --accent-muted: 162 40% 35%;
+}
+
+body {
+  @apply bg-surface text-ink antialiased;
+}
+
+@layer utilities {
+  .card {
+    @apply rounded-xl border border-white/10 bg-surface-muted/60 backdrop-blur;
+  }
+}
