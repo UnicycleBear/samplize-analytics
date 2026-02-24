@@ -205,7 +205,13 @@ export async function fetchAllOrders(
       nextPageInfo,
       fields
     );
-    all.push(...result.orders);
+    const page = result.orders;
+    const lastOrder = page[page.length - 1];
+    if (lastOrder && lastOrder.created_at < createdAtMin) {
+      all.push(...page.filter((o) => o.created_at >= createdAtMin));
+      break;
+    }
+    all.push(...page);
     nextPageInfo = result.nextPageInfo;
   } while (nextPageInfo);
   console.log("[shopify] fetchAllOrders response count:", all.length, "raw first order:", JSON.stringify(all[0]));

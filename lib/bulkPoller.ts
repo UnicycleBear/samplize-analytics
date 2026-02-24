@@ -23,8 +23,8 @@ async function runBulkFetch(): Promise<void> {
       fetchRecentOrdersViaBulk(),
       config ? fetchMtdLyOrdersViaRest(config) : Promise.resolve([]),
     ]);
-    setCachedRecentOrders(recentOrders, mtdLyOrders?.length ? mtdLyOrders : null);
-    console.log("[bulkPoller] done", recentOrders.length, "orders", mtdLyOrders?.length ?? 0, "MTD LY");
+    console.log("[bulkPoller] recentOrders:", recentOrders.length, "mtdLy:", mtdLyOrders?.length ?? 0);
+    setCachedRecentOrders(recentOrders, mtdLyOrders?.length ? mtdLyOrders : null); // (orders from bulk op, MTD LY from REST)
   } catch (err) {
     console.error("[bulkPoller] error:", err instanceof Error ? err.message : String(err));
   }

@@ -616,7 +616,7 @@ export async function fetchRecentOrdersViaBulk(recursed = false): Promise<Recent
   }
   const orders = await downloadAndParseRecentOrdersJSONL(downloadUrl);
   console.log("[bulk] parsed orders count:", orders.length, "first order lineItems count:", orders[0]?.lineItems?.length);
-  if (orders.length > 0 && orders[0].lineItems.length === 0) {
+  if (orders.length === 0 || orders[0]?.lineItems?.length === 0) {
     if (recursed) {
       throw new Error("[bulk] Stale bulk op (no lineItems) still present after retry; cache not updated");
     }
