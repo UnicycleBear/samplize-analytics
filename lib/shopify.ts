@@ -1,15 +1,88 @@
 /**
  * Shopify REST Admin API client.
- * Uses Admin API access token (store in SAMPLIZE_API_KEY / SAMPLIZE_RETAIL_API_KEY).
+ * Uses Admin API access token (store in SAMPLIZE_API_KEY).
  */
+
+import type { RecentOrder } from "./bulkOperations";
+import { startOfMonth, subYears, format } from "date-fns";
 
 const API_VERSION = "2024-01";
 const LIMIT = 250;
+const FETCH_TIMEOUT_MS = 30000;
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Shopify request timed out after ${timeoutMs / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export type ShopifyConfig = {
   storeUrl: string;
   accessToken: string;
 };
+
+export function getShopifyConfig(): ShopifyConfig | null {
+  const url = process.env.SAMPLIZE_STORE_URL;
+  const token = process.env.SAMPLIZE_API_KEY;
+  if (!url || !token) return null;
+  return { storeUrl: url, accessToken: token };
+}
+
+const MTD_LY_FIELDS =
+  "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status";
+
+function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
+  const totalPrice = parseFloat(String(o.current_total_price || "0").replace(/[^0-9.-]/g, "")) || 0;
+  const lineItems = (o.line_items || []).map((li) => {
+    const title = (li.title ?? "Unknown").trim() || "Unknown";
+    const qty = li.quantity ?? 0;
+    const unitPrice = parseFloat(String(li.price || "0").replace(/[^0-9.-]/g, "")) || 0;
+    return {
+      title,
+      quantity: qty,
+      unitPrice,
+      productId: null,
+      productTitle: title,
+      lineRevenue: qty * unitPrice,
+    };
+  });
+  return {
+    id: String(o.id),
+    createdAt: o.created_at ?? "",
+    totalPrice: Number.isFinite(totalPrice) ? totalPrice : 0,
+    lineItems,
+    shippingCountryCode: (o.shipping_address?.country_code ?? "").toUpperCase(),
+    sourceName: (o.source_name ?? "").trim() || "",
+    financialStatus: (o.financial_status ?? "").toLowerCase(),
+    customerId: null,
+    hasRefund: false,
+  };
+}
+
+export async function fetchMtdLyOrdersViaRest(config: ShopifyConfig): Promise<RecentOrder[]> {
+  const today = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  const monthStartLy = startOfMonth(subYears(today, 1));
+  const sameDayLy = subYears(today, 1);
+  const min = format(monthStartLy, "yyyy-MM-dd'T'00:00:00'Z'");
+  const max = format(sameDayLy, "yyyy-MM-dd'T'23:59:59'Z'");
+  console.log("[shopify] MTD LY REST date range (UTC)", { created_at_min: min, created_at_max: max });
+  const orders = await fetchAllOrders(config, min, max, MTD_LY_FIELDS);
+  return orders.map(shopifyOrderToRecent);
+}
 
 export type ShopifyOrder = {
   id: number;
@@ -19,7 +92,13 @@ export type ShopifyOrder = {
   currency: string;
   source_name: string | null;
   billing_address: { country_code: string } | null;
-  line_items: Array< { quantity: number } >;
+  shipping_address: { country_code: string } | null;
+  financial_status: string | null;
+  line_items: Array<{
+    quantity: number;
+    title?: string;
+    price?: string;
+  }>;
   customer?: { id: number } | null;
 };
 
@@ -46,6 +125,8 @@ export function shopifyBaseUrl(storeUrl: string): string {
   return `https://${host}.myshopify.com/admin/api/${API_VERSION}`;
 }
 
+const RATE_LIMIT_RETRY_MS = 500;
+
 async function fetchShopify<T>(
   config: ShopifyConfig,
   path: string,
@@ -54,13 +135,20 @@ async function fetchShopify<T>(
   const base = shopifyBaseUrl(config.storeUrl);
   const search = new URLSearchParams({ limit: String(LIMIT), ...params });
   const url = `${base}${path}?${search}`;
-  const res = await fetch(url, {
+  console.log("[shopify] fetchShopify request:", path, Object.keys(params));
+  const opts: RequestInit = {
     headers: {
       "X-Shopify-Access-Token": config.accessToken,
       "Content-Type": "application/json",
     },
-    next: { revalidate: 300 },
-  });
+    cache: "no-store",
+  };
+  let res = await fetchWithTimeout(url, opts, FETCH_TIMEOUT_MS);
+  if (res.status === 429) {
+    await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS));
+    res = await fetchWithTimeout(url, opts, FETCH_TIMEOUT_MS);
+  }
+  console.log("[shopify] fetchShopify response:", path, res.status);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Shopify API ${res.status}: ${text}`);
@@ -75,20 +163,24 @@ async function fetchShopify<T>(
   return { data, nextPageInfo };
 }
 
+const ORDER_FIELDS =
+  "id,created_at,current_total_price,total_price,line_items,billing_address,shipping_address,source_name,financial_status,customer";
+
 export async function fetchOrders(
   config: ShopifyConfig,
   createdAtMin: string,
   createdAtMax: string,
-  pageInfo?: string
+  pageInfo?: string,
+  fields?: string
 ): Promise<{ orders: ShopifyOrder[]; nextPageInfo?: string }> {
-  const params: Record<string, string> = {
-    status: "any",
-    created_at_min: createdAtMin,
-    created_at_max: createdAtMax,
-    fields:
-      "id,created_at,current_total_price,total_price,currency,source_name,billing_address,line_items,customer",
-  };
-  if (pageInfo) params.page_info = pageInfo;
+  const params: Record<string, string> = pageInfo
+    ? { page_info: pageInfo }
+    : {
+        status: "any",
+        created_at_min: createdAtMin,
+        created_at_max: createdAtMax,
+        fields: fields ?? ORDER_FIELDS,
+      };
   const { data, nextPageInfo } = await fetchShopify<{ orders: ShopifyOrder[] }>(
     config,
     "/orders.json",
@@ -100,7 +192,8 @@ export async function fetchOrders(
 export async function fetchAllOrders(
   config: ShopifyConfig,
   createdAtMin: string,
-  createdAtMax: string
+  createdAtMax: string,
+  fields?: string
 ): Promise<ShopifyOrder[]> {
   const all: ShopifyOrder[] = [];
   let nextPageInfo: string | undefined;
@@ -109,11 +202,13 @@ export async function fetchAllOrders(
       config,
       createdAtMin,
       createdAtMax,
-      nextPageInfo
+      nextPageInfo,
+      fields
     );
     all.push(...result.orders);
     nextPageInfo = result.nextPageInfo;
   } while (nextPageInfo);
+  console.log("[shopify] fetchAllOrders response count:", all.length, "raw first order:", JSON.stringify(all[0]));
   return all;
 }
 
@@ -123,35 +218,45 @@ export async function fetchCustomersCreatedInRange(
   createdAtMax: string
 ): Promise<number> {
   const base = shopifyBaseUrl(config.storeUrl);
-  const params = new URLSearchParams({
-    limit: "250",
-    created_at_min: createdAtMin,
-    created_at_max: createdAtMax,
-    fields: "id,created_at",
-  });
+  console.log("[shopify] fetchCustomersCreatedInRange start", config.storeUrl, { created_at_min: createdAtMin, created_at_max: createdAtMax });
+  const opts: RequestInit = {
+    headers: {
+      "X-Shopify-Access-Token": config.accessToken,
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
+  };
   let count = 0;
-  let pageInfo: string | undefined;
+  let page = 0;
+  let nextUrl: string | null = null;
   do {
-    const url = pageInfo
-      ? `${base}/customers.json?limit=250&page_info=${encodeURIComponent(pageInfo)}&fields=id,created_at`
-      : `${base}/customers.json?${params}`;
-    const res = await fetch(url, {
-      headers: {
-        "X-Shopify-Access-Token": config.accessToken,
-        "Content-Type": "application/json",
-      },
-      next: { revalidate: 300 },
-    });
+    page++;
+    console.log("[shopify] fetchCustomersCreatedInRange page", page);
+    const url =
+      nextUrl ??
+      `${base}/customers.json?${new URLSearchParams({
+        limit: "250",
+        created_at_min: createdAtMin,
+        created_at_max: createdAtMax,
+        fields: "id,created_at",
+      }).toString()}`;
+    nextUrl = null;
+    let res = await fetchWithTimeout(url, opts, FETCH_TIMEOUT_MS);
+    if (res.status === 429) {
+      await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS));
+      res = await fetchWithTimeout(url, opts, FETCH_TIMEOUT_MS);
+    }
+    console.log("[shopify] fetchCustomersCreatedInRange page", page, "response", res.status);
     if (!res.ok) break;
     const data = await res.json();
     const customers: ShopifyCustomer[] = data.customers || [];
     count += customers.length;
     const link = res.headers.get("Link");
-    pageInfo = undefined;
     if (link && link.includes('rel="next"')) {
-      const m = link.match(/page_info=([^>&"'\s]+)/);
-      if (m) pageInfo = m[1];
+      const nextMatch = link.match(/<([^>]+)>;\s*rel="next"/);
+      if (nextMatch) nextUrl = nextMatch[1].trim();
     }
-  } while (pageInfo);
+  } while (nextUrl);
+  console.log("[shopify] fetchCustomersCreatedInRange done", config.storeUrl, "count", count);
   return count;
 }

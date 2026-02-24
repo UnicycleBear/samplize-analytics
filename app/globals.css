@@ -3,20 +3,62 @@
 @tailwind utilities;
 
 :root {
-  --surface: 220 18% 12%;
-  --surface-muted: 220 14% 18%;
-  --ink: 0 0% 98%;
-  --ink-muted: 220 10% 60%;
-  --accent: 162 63% 41%;
-  --accent-muted: 162 40% 35%;
+  --analytics-bg: #F0F2F5;
+  --analytics-surface: #FFFFFF;
+  --navy-primary: #0F2040;
+  --navy-secondary: #1A3358;
+  --teal-accent: #00897B;
+  --teal-light: #4DB6AC;
+  --gray-text: #4A5568;
+  --border-light: #E2E8F0;
+  --positive: #38A169;
+  --negative: #E53E3E;
 }
 
 body {
-  @apply bg-surface text-ink antialiased;
+  @apply antialiased;
+  background-color: var(--analytics-bg);
+  color: var(--navy-primary);
 }
 
 @layer utilities {
   .card {
-    @apply rounded-xl border border-white/10 bg-surface-muted/60 backdrop-blur;
+    @apply rounded-xl bg-analytics-surface shadow-md;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    color: #0F2040 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .card {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #E2E8F0 !important;
+    background: white !important;
+  }
+  section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  section + section {
+    page-break-before: auto;
+  }
+  .grid {
+    display: grid !important;
+  }
+  /* Charts full width when printing */
+  .print-chart-full {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  @page {
+    margin: 1cm;
   }
 }

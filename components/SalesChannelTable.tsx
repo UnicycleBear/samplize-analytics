@@ -15,43 +15,54 @@ export function SalesChannelTable({ rows }: Props) {
 
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/10">
-        <h3 className="font-semibold">Revenue by sales channel (MoM)</h3>
-      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-ink-muted border-b border-white/10">
-              <th className="px-5 py-3 font-medium">Channel</th>
-              <th className="px-5 py-3 font-medium text-right">Revenue</th>
-              <th className="px-5 py-3 font-medium text-right">Prev month</th>
-              <th className="px-5 py-3 font-medium text-right">MoM %</th>
+            <tr className="bg-analytics-navy-primary text-white">
+              <th className="px-5 py-3 font-medium uppercase tracking-wider text-left">
+                Channel
+              </th>
+              <th className="px-5 py-3 font-medium uppercase tracking-wider text-right">
+                Revenue
+              </th>
+              <th className="px-5 py-3 font-medium uppercase tracking-wider text-right">
+                Prev month
+              </th>
+              <th className="px-5 py-3 font-medium uppercase tracking-wider text-right">
+                MoM %
+              </th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, i) => (
               <tr
                 key={row.channel}
-                className="border-b border-white/5 hover:bg-white/5"
+                className={`border-b border-analytics-border-light hover:bg-analytics-teal-light/10 ${
+                  i % 2 === 1 ? "bg-analytics-table-stripe" : "bg-white"
+                }`}
               >
-                <td className="px-5 py-3 font-medium">{row.channel}</td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3 font-medium text-analytics-navy-primary">
+                  {row.channel}
+                </td>
+                <td className="px-5 py-3 text-right tabular-nums font-bold text-analytics-navy-primary">
                   {formatCurrency(row.revenue)}
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums text-ink-muted">
+                <td className="px-5 py-3 text-right tabular-nums text-analytics-gray-text">
                   {formatCurrency(row.revenuePrevMonth)}
                 </td>
-                <td
-                  className={`px-5 py-3 text-right tabular-nums ${
-                    row.momChangePercent > 0
-                      ? "text-emerald-400"
-                      : row.momChangePercent < 0
-                        ? "text-rose-400"
-                        : "text-ink-muted"
-                  }`}
-                >
-                  {row.momChangePercent > 0 ? "+" : ""}
-                  {row.momChangePercent.toFixed(1)}%
+                <td className="px-5 py-3 text-right">
+                  <span
+                    className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
+                      row.momChangePercent > 0
+                        ? "bg-analytics-positive/15 text-analytics-positive"
+                        : row.momChangePercent < 0
+                          ? "bg-analytics-negative/15 text-analytics-negative"
+                          : "bg-analytics-gray-text/10 text-analytics-gray-text"
+                    }`}
+                  >
+                    {row.momChangePercent > 0 ? "+" : ""}
+                    {row.momChangePercent.toFixed(1)}%
+                  </span>
                 </td>
               </tr>
             ))}

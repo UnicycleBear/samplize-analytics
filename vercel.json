@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/refresh-cache",
+      "schedule": "0 6 * * *"
+    }
+  ],
+  "functions": {
+    "app/api/analytics/fast/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/analytics/weekly/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}

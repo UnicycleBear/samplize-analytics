@@ -1,22 +1,20 @@
 import {
   startOfMonth,
   endOfMonth,
-  subYears,
   subDays,
   subWeeks,
+  subMonths,
   format,
   parseISO,
   startOfDay,
   endOfDay,
-  startOfWeek,
-  endOfWeek,
   eachDayOfInterval,
-  getWeek,
-  isWithinInterval,
 } from "date-fns";
-import type { ShopifyOrder } from "./shopify";
+import type { RecentOrder } from "./bulkOperations";
 
-export type StoreKey = "samplize" | "samplize_retail" | "combined";
+export type WeeklyRevenue = { weekStart: string; revenue: number };
+
+export type StoreKey = "samplize";
 
 export type MetricComparison = {
   current: number;
@@ -29,6 +27,12 @@ export type SalesChannelRow = {
   revenue: number;
   revenuePrevMonth: number;
   momChangePercent: number;
+};
+
+export type TopProductRow = {
+  title: string;
+  unitsSold: number;
+  revenue: number;
 };
 
 export type StoreMetrics = {
@@ -49,39 +53,46 @@ export type StoreMetrics = {
   salesByChannel: SalesChannelRow[];
   dailySales: { date: string; total: number }[];
   weeklySalesByYear: { year: number; weekLabel: string; total: number }[];
+
+  top10Products: TopProductRow[];
+  refundRatePercent: number;
+  repeatCustomerRatePercent: number;
+  ordersPerDayMtd: number;
+  grossRevenueMtd: number;
+  netRevenueMtd: number;
 };
 
-function toNum(s: string | undefined): number {
-  if (s == null || s === "") return 0;
-  const n = parseFloat(String(s).replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
+/** Map Shopify source_name to display channel. */
+function channelDisplayName(sourceName: string | null | undefined): string {
+  if (!sourceName) return "Direct";
+  const s = sourceName.toLowerCase();
+  if (s === "web") return "Online Store";
+  if (s.includes("android") || s.includes("ios")) return "Mobile App";
+  if (s === "subscription_contract") return "Subscriptions";
+  if (s === "pos") return "Retail/POS";
+  if (!s || s === "") return "Direct";
+  return "Other";
 }
 
-function orderTotal(order: ShopifyOrder): number {
-  return toNum(order.current_total_price ?? order.total_price);
+function isCancelledRecent(o: RecentOrder): boolean {
+  const s = o.financialStatus.toLowerCase();
+  return s === "cancelled" || s === "canceled";
 }
 
-function orderDate(order: ShopifyOrder): Date {
-  return parseISO(order.created_at);
+function isRefundedRecent(o: RecentOrder): boolean {
+  const s = o.financialStatus.toLowerCase();
+  return s === "refunded" || s === "partially_refunded";
 }
 
-function orderCountry(order: ShopifyOrder): string {
-  const code = order.billing_address?.country_code;
-  return code ? String(code).toUpperCase() : "";
-}
-
-function orderSource(order: ShopifyOrder): string {
-  const s = order.source_name;
-  return s && String(s).trim() ? String(s).trim() : "Other";
-}
-
-function orderUnits(order: ShopifyOrder): number {
-  return (order.line_items || []).reduce((sum, li) => sum + (li.quantity || 0), 0);
-}
-
-export function computeStoreMetrics(
-  orders: ShopifyOrder[],
-  newCustomersCount: number,
+/**
+ * Computes all fast metrics from a single flat array of recent orders (e.g. from bulk op).
+ * MTD LY uses mtdLyOrders when provided; otherwise previous is 0.
+ * weeklySalesByYear is left empty (weekly chart comes from /api/analytics/weekly).
+ * New customers MTD: proxy = orders where customer has only 1 order in the dataset.
+ */
+export function computeMetricsFromRecentOrders(
+  orders: RecentOrder[],
+  mtdLyOrders: RecentOrder[] | null,
   store: StoreKey,
   label: string,
   now: Date = new Date()
@@ -93,140 +104,144 @@ export function computeStoreMetrics(
   const sameDayLastWeek = subWeeks(yesterday, 1);
   const sameDayLastWeekStart = startOfDay(sameDayLastWeek);
   const sameDayLastWeekEnd = endOfDay(sameDayLastWeek);
-
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
-  const lastYearMonthStart = startOfMonth(subYears(today, 1));
-  const lastYearMonthEnd = endOfMonth(subYears(today, 1));
+  const prevMonthStart = startOfMonth(subMonths(today, 1));
+  const prevMonthEnd = endOfMonth(subMonths(today, 1));
+  const trailing30Start = subDays(today, 30);
 
+  const orderDate = (o: RecentOrder) => parseISO(o.createdAt);
+  const effective = (o: RecentOrder) => !isCancelledRecent(o);
+
+  const ordersMtd = orders.filter((o) => {
+    const d = orderDate(o);
+    return effective(o) && d >= monthStart && d <= monthEnd;
+  });
+  const ordersMtdLy = mtdLyOrders
+    ? mtdLyOrders.filter((o) => effective(o))
+    : [];
+  const ordersLast30 = orders.filter((o) => {
+    const d = orderDate(o);
+    return effective(o) && d >= trailing30Start && d <= today;
+  });
   const ordersYesterday = orders.filter((o) => {
     const d = orderDate(o);
-    return d >= yesterdayStart && d <= yesterdayEnd;
+    return effective(o) && d >= yesterdayStart && d <= yesterdayEnd;
   });
   const ordersSameDayLastWeek = orders.filter((o) => {
     const d = orderDate(o);
-    return d >= sameDayLastWeekStart && d <= sameDayLastWeekEnd;
+    return effective(o) && d >= sameDayLastWeekStart && d <= sameDayLastWeekEnd;
   });
-  const ordersMtd = orders.filter((o) => {
-    const d = orderDate(o);
-    return d >= monthStart && d <= monthEnd;
-  });
-  const ordersMtdLy = orders.filter((o) => {
-    const d = orderDate(o);
-    return d >= lastYearMonthStart && d <= lastYearMonthEnd;
-  });
-
-  const salesYesterday = ordersYesterday.reduce((s, o) => s + orderTotal(o), 0);
-  const salesSameDayLastWeek = ordersSameDayLastWeek.reduce(
-    (s, o) => s + orderTotal(o),
-    0
-  );
-  const salesMtd = ordersMtd.reduce((s, o) => s + orderTotal(o), 0);
-  const salesMtdLy = ordersMtdLy.reduce((s, o) => s + orderTotal(o), 0);
-
-  const prevMonthStart = startOfMonth(subDays(monthStart, 1));
-  const prevMonthEnd = endOfMonth(subDays(monthStart, 1));
   const ordersPrevMonth = orders.filter((o) => {
     const d = orderDate(o);
-    return d >= prevMonthStart && d <= prevMonthEnd;
+    return effective(o) && d >= prevMonthStart && d <= prevMonthEnd;
   });
+
+  console.log("[analytics] first MTD order lineItems:", JSON.stringify(ordersMtd[0]?.lineItems));
+
+  const salesMtd = ordersMtd.reduce((s, o) => s + o.totalPrice, 0);
+  const salesMtdLy = ordersMtdLy.reduce((s, o) => s + o.totalPrice, 0);
+  const salesYesterday = ordersYesterday.reduce((s, o) => s + o.totalPrice, 0);
+  const salesSameDayLastWeek = ordersSameDayLastWeek.reduce((s, o) => s + o.totalPrice, 0);
 
   const channelRevenueThisMonth: Record<string, number> = {};
   const channelRevenuePrevMonth: Record<string, number> = {};
   ordersMtd.forEach((o) => {
-    const ch = orderSource(o);
-    channelRevenueThisMonth[ch] = (channelRevenueThisMonth[ch] || 0) + orderTotal(o);
+    const ch = channelDisplayName(o.sourceName);
+    channelRevenueThisMonth[ch] = (channelRevenueThisMonth[ch] || 0) + o.totalPrice;
   });
   ordersPrevMonth.forEach((o) => {
-    const ch = orderSource(o);
-    channelRevenuePrevMonth[ch] = (channelRevenuePrevMonth[ch] || 0) + orderTotal(o);
+    const ch = channelDisplayName(o.sourceName);
+    channelRevenuePrevMonth[ch] = (channelRevenuePrevMonth[ch] || 0) + o.totalPrice;
   });
   const allChannels = new Set([
     ...Object.keys(channelRevenueThisMonth),
     ...Object.keys(channelRevenuePrevMonth),
   ]);
-  const salesByChannel: SalesChannelRow[] = Array.from(allChannels).map(
-    (channel) => {
-      const revenue = channelRevenueThisMonth[channel] || 0;
-      const revenuePrevMonth = channelRevenuePrevMonth[channel] || 0;
-      const momChangePercent =
-        revenuePrevMonth > 0
-          ? ((revenue - revenuePrevMonth) / revenuePrevMonth) * 100
-          : (revenue > 0 ? 100 : 0);
-      return { channel, revenue, revenuePrevMonth, momChangePercent };
-    }
-  );
+  const salesByChannel: SalesChannelRow[] = Array.from(allChannels).map((channel) => {
+    const revenue = channelRevenueThisMonth[channel] || 0;
+    const revenuePrevMonth = channelRevenuePrevMonth[channel] || 0;
+    const momChangePercent =
+      revenuePrevMonth > 0
+        ? ((revenue - revenuePrevMonth) / revenuePrevMonth) * 100
+        : revenue > 0 ? 100 : 0;
+    return { channel, revenue, revenuePrevMonth, momChangePercent };
+  });
   salesByChannel.sort((a, b) => b.revenue - a.revenue);
 
-  const totalSalesCanadaMtd = ordersMtd.filter(
-    (o) => orderCountry(o) === "CA"
-  ).reduce((s, o) => s + orderTotal(o), 0);
-  const canadaSalesPercent =
-    salesMtd > 0 ? (totalSalesCanadaMtd / salesMtd) * 100 : 0;
+  const totalSalesCanadaMtd = ordersMtd.filter((o) => o.shippingCountryCode === "CA").reduce((s, o) => s + o.totalPrice, 0);
+  const canadaSalesPercent = salesMtd > 0 ? (totalSalesCanadaMtd / salesMtd) * 100 : 0;
 
-  const unitsMtd = ordersMtd.reduce((s, o) => s + orderUnits(o), 0);
-  const unitsPerOrderMtd =
-    ordersMtd.length > 0 ? unitsMtd / ordersMtd.length : 0;
+  const totalUnitsMtd = ordersMtd.reduce((s, o) => s + o.lineItems.reduce((sum, li) => sum + li.quantity, 0), 0);
+  const unitsPerOrderMtd = ordersMtd.length > 0 ? totalUnitsMtd / ordersMtd.length : 0;
 
   const aovMtd = ordersMtd.length > 0 ? salesMtd / ordersMtd.length : 0;
-  const aovMtdPrev =
-    ordersMtdLy.length > 0
-      ? salesMtdLy / ordersMtdLy.length
-      : 0;
-  const aovYesterday =
-    ordersYesterday.length > 0 ? salesYesterday / ordersYesterday.length : 0;
-  const aovYesterdayPrev =
-    ordersSameDayLastWeek.length > 0
-      ? salesSameDayLastWeek / ordersSameDayLastWeek.length
-      : 0;
+  const aovMtdPrev = ordersMtdLy.length > 0 ? salesMtdLy / ordersMtdLy.length : 0;
+  const aovYesterday = ordersYesterday.length > 0 ? salesYesterday / ordersYesterday.length : 0;
+  const aovYesterdayPrev = ordersSameDayLastWeek.length > 0 ? salesSameDayLastWeek / ordersSameDayLastWeek.length : 0;
 
   const change = (cur: number, prev: number) =>
     prev > 0 ? ((cur - prev) / prev) * 100 : cur > 0 ? 100 : 0;
 
-  const trailingStart = subDays(today, 30);
+  const grossRevenueMtd = ordersMtd.reduce((s, o) => s + o.totalPrice, 0);
+  const netRevenueMtd = salesMtd;
+
+  const refundedCountMtd = ordersMtd.filter((o) => o.hasRefund ?? isRefundedRecent(o)).length;
+  const refundRatePercent = ordersMtd.length > 0 ? (refundedCountMtd / ordersMtd.length) * 100 : 0;
+
+  // New vs repeat from within-dataset: first order date per customer (in our 65-day window)
+  const monthStartStr = format(monthStart, "yyyy-MM-dd");
+  const firstOrderDateByCustomerId = new Map<string, string>();
+  orders.forEach((o) => {
+    if (!o.customerId) return;
+    const d = format(orderDate(o), "yyyy-MM-dd");
+    const existing = firstOrderDateByCustomerId.get(o.customerId);
+    if (existing == null || d < existing) firstOrderDateByCustomerId.set(o.customerId, d);
+  });
+  const newCustomersMtdCount = ordersMtd.filter(
+    (o) => o.customerId && (firstOrderDateByCustomerId.get(o.customerId) ?? "") >= monthStartStr
+  ).length;
+  const repeatOrdersMtdCount = ordersMtd.filter(
+    (o) => o.customerId && (firstOrderDateByCustomerId.get(o.customerId) ?? "") < monthStartStr
+  ).length;
+  const repeatCustomerRatePercent = ordersMtd.length > 0 ? (repeatOrdersMtdCount / ordersMtd.length) * 100 : 0;
+
+  const daysInPeriod = Math.max(1, Math.ceil((today.getTime() - monthStart.getTime()) / (24 * 60 * 60 * 1000)));
+  const ordersPerDayMtd = ordersMtd.length / daysInPeriod;
+
+  const productRevenue: Record<string, { title: string; units: number; revenue: number }> = {};
+  ordersMtd.forEach((o) => {
+    o.lineItems.forEach((li) => {
+      const key = (li.title ?? "Unknown").trim() || "Unknown";
+      const title = (li.title ?? "Unknown").trim() || "Unknown";
+      const qty = li.quantity ?? 0;
+      const revenue = li.lineRevenue > 0 ? li.lineRevenue : qty * (li.unitPrice ?? 0);
+      if (!productRevenue[key]) productRevenue[key] = { title, units: 0, revenue: 0 };
+      productRevenue[key].units += qty;
+      productRevenue[key].revenue += revenue;
+    });
+  });
+  const top10Products: TopProductRow[] = Object.values(productRevenue)
+    .map(({ title, units, revenue }) => ({ title, unitsSold: units, revenue }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 10);
+
   const dailySalesMap: Record<string, number> = {};
-  eachDayOfInterval({ start: trailingStart, end: yesterday }).forEach((d) => {
+  eachDayOfInterval({ start: trailing30Start, end: yesterday }).forEach((d) => {
     dailySalesMap[format(d, "yyyy-MM-dd")] = 0;
   });
-  orders.forEach((o) => {
+  ordersLast30.forEach((o) => {
     const d = orderDate(o);
-    if (d >= trailingStart && d <= yesterday) {
+    if (d >= trailing30Start && d <= yesterday) {
       const key = format(d, "yyyy-MM-dd");
-      dailySalesMap[key] = (dailySalesMap[key] || 0) + orderTotal(o);
+      dailySalesMap[key] = (dailySalesMap[key] || 0) + o.totalPrice;
     }
   });
   const dailySales = Object.entries(dailySalesMap)
     .map(([date, total]) => ({ date, total }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const years = [2024, 2025, 2026];
-  const byYearWeekNum: Record<number, Record<number, number>> = {};
-  years.forEach((y) => {
-    byYearWeekNum[y] = {};
-  });
-  orders.forEach((o) => {
-    const d = orderDate(o);
-    const y = d.getFullYear();
-    if (!years.includes(y)) return;
-    const w = getWeek(d, { weekStartsOn: 0 });
-    byYearWeekNum[y][w] = (byYearWeekNum[y][w] || 0) + orderTotal(o);
-  });
-  const allWeekNums = new Set<number>();
-  years.forEach((y) => {
-    Object.keys(byYearWeekNum[y]).forEach((k) => allWeekNums.add(Number(k)));
-  });
-  const sortedWeekNums = Array.from(allWeekNums).sort((a, b) => a - b);
-  const weeklySalesByYearNormalized: { year: number; weekLabel: string; total: number }[] = [];
-  sortedWeekNums.forEach((weekNum) => {
-    const weekLabel = `W${weekNum}`;
-    years.forEach((year) => {
-      weeklySalesByYearNormalized.push({
-        year,
-        weekLabel,
-        total: byYearWeekNum[year][weekNum] || 0,
-      });
-    });
-  });
+  const newCustomersMtd = newCustomersMtdCount;
 
   return {
     store,
@@ -249,148 +264,23 @@ export function computeStoreMetrics(
     ordersYesterday: {
       current: ordersYesterday.length,
       previous: ordersSameDayLastWeek.length,
-      changePercent: change(
-        ordersYesterday.length,
-        ordersSameDayLastWeek.length
-      ),
+      changePercent: change(ordersYesterday.length, ordersSameDayLastWeek.length),
     },
     aovMtd,
     aovMtdPrev,
     aovYesterday,
     aovYesterdayPrev,
     unitsPerOrderMtd,
-    newCustomersMtd: newCustomersCount,
+    newCustomersMtd: newCustomersMtd,
     canadaSalesPercent,
     salesByChannel,
     dailySales,
-    weeklySalesByYear: weeklySalesByYearNormalized,
-  };
-}
-
-export function combineStoreMetrics(
-  samplize: StoreMetrics,
-  retail: StoreMetrics
-): StoreMetrics {
-  const sum = (a: number, b: number) => a + b;
-  const sumComp = (
-    c: MetricComparison,
-    d: MetricComparison
-  ): MetricComparison => ({
-    current: c.current + d.current,
-    previous: c.previous + d.previous,
-    changePercent:
-      c.previous + d.previous > 0
-        ? ((c.current + d.current - (c.previous + d.previous)) /
-            (c.previous + d.previous)) *
-          100
-        : c.current + d.current > 0
-          ? 100
-          : 0,
-  });
-
-  const channelMap: Record<string, SalesChannelRow> = {};
-  [...samplize.salesByChannel, ...retail.salesByChannel].forEach((row) => {
-    if (!channelMap[row.channel]) {
-      channelMap[row.channel] = {
-        channel: row.channel,
-        revenue: 0,
-        revenuePrevMonth: 0,
-        momChangePercent: 0,
-      };
-    }
-    channelMap[row.channel].revenue += row.revenue;
-    channelMap[row.channel].revenuePrevMonth += row.revenuePrevMonth;
-  });
-  Object.values(channelMap).forEach((row) => {
-    row.momChangePercent =
-      row.revenuePrevMonth > 0
-        ? ((row.revenue - row.revenuePrevMonth) / row.revenuePrevMonth) * 100
-        : row.revenue > 0 ? 100 : 0;
-  });
-  const salesByChannel = Object.values(channelMap).sort(
-    (a, b) => b.revenue - a.revenue
-  );
-
-  const dailyMap: Record<string, number> = {};
-  samplize.dailySales.forEach(({ date, total }) => {
-    dailyMap[date] = (dailyMap[date] || 0) + total;
-  });
-  retail.dailySales.forEach(({ date, total }) => {
-    dailyMap[date] = (dailyMap[date] || 0) + total;
-  });
-  const dailySales = Object.entries(dailyMap)
-    .map(([date, total]) => ({ date, total }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  const weekMap: Record<string, Record<number, number>> = {};
-  [...samplize.weeklySalesByYear, ...retail.weeklySalesByYear].forEach(
-    ({ year, weekLabel, total }) => {
-      if (!weekMap[weekLabel]) weekMap[weekLabel] = {};
-      weekMap[weekLabel][year] = (weekMap[weekLabel][year] || 0) + total;
-    }
-  );
-  const weeklySalesByYear: { year: number; weekLabel: string; total: number }[] = [];
-  [2024, 2025, 2026].forEach((year) => {
-    Object.entries(weekMap).forEach(([weekLabel, byYear]) => {
-      weeklySalesByYear.push({
-        year,
-        weekLabel,
-        total: byYear[year] || 0,
-      });
-    });
-  });
-
-  const totalMtd =
-    samplize.totalSalesMtd.current + retail.totalSalesMtd.current;
-  const totalMtdLy =
-    samplize.totalSalesMtd.previous + retail.totalSalesMtd.previous;
-  const canadaMtd =
-    (samplize.canadaSalesPercent / 100) * samplize.totalSalesMtd.current +
-    (retail.canadaSalesPercent / 100) * retail.totalSalesMtd.current;
-  const canadaSalesPercent = totalMtd > 0 ? (canadaMtd / totalMtd) * 100 : 0;
-
-  const ordersMtdCombined = samplize.ordersMtd.current + retail.ordersMtd.current;
-  const ordersMtdLyCombined =
-    samplize.ordersMtd.previous + retail.ordersMtd.previous;
-  const aovMtdCombined =
-    ordersMtdCombined > 0 ? totalMtd / ordersMtdCombined : 0;
-  const aovMtdLyCombined =
-    ordersMtdLyCombined > 0 ? totalMtdLy / ordersMtdLyCombined : 0;
-  const unitsMtd =
-    samplize.unitsPerOrderMtd * samplize.ordersMtd.current +
-    retail.unitsPerOrderMtd * retail.ordersMtd.current;
-  const unitsPerOrderMtd =
-    ordersMtdCombined > 0 ? unitsMtd / ordersMtdCombined : 0;
-
-  return {
-    store: "combined",
-    label: "Combined",
-    totalSalesMtd: sumComp(samplize.totalSalesMtd, retail.totalSalesMtd),
-    totalSalesYesterday: sumComp(
-      samplize.totalSalesYesterday,
-      retail.totalSalesYesterday
-    ),
-    ordersMtd: sumComp(samplize.ordersMtd, retail.ordersMtd),
-    ordersYesterday: sumComp(samplize.ordersYesterday, retail.ordersYesterday),
-    aovMtd: aovMtdCombined,
-    aovMtdPrev: aovMtdLyCombined,
-    aovYesterday:
-      samplize.ordersYesterday.current + retail.ordersYesterday.current > 0
-        ? (samplize.totalSalesYesterday.current +
-            retail.totalSalesYesterday.current) /
-          (samplize.ordersYesterday.current + retail.ordersYesterday.current)
-        : 0,
-    aovYesterdayPrev:
-      samplize.ordersYesterday.previous + retail.ordersYesterday.previous > 0
-        ? (samplize.totalSalesYesterday.previous +
-            retail.totalSalesYesterday.previous) /
-          (samplize.ordersYesterday.previous + retail.ordersYesterday.previous)
-        : 0,
-    unitsPerOrderMtd,
-    newCustomersMtd: samplize.newCustomersMtd + retail.newCustomersMtd,
-    canadaSalesPercent,
-    salesByChannel,
-    dailySales,
-    weeklySalesByYear,
+    weeklySalesByYear: [],
+    top10Products,
+    refundRatePercent,
+    repeatCustomerRatePercent,
+    ordersPerDayMtd,
+    grossRevenueMtd,
+    netRevenueMtd,
   };
 }

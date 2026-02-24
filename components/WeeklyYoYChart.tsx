@@ -17,14 +17,20 @@ type Props = {
   data: Point[];
 };
 
-const COLORS = ["#22c55e", "#3b82f6", "#a855f7"];
+const TEAL_PRIMARY = "#00897B";
+const NAVY_SECONDARY = "#1A3358";
+const GRAY_PRIOR_YEAR = "#A0AEC0";
+const GRID_STROKE = "#EDF2F7";
+const TOOLTIP_BG = "#0F2040";
+const TOOLTIP_BORDER = "#00897B";
+
+const COLORS = [TEAL_PRIMARY, NAVY_SECONDARY, GRAY_PRIOR_YEAR];
+
+const WEEK_LABELS = Array.from({ length: 52 }, (_, i) => `W${i + 1}`);
 
 export function WeeklyYoYChart({ data }: Props) {
-  const years = [...new Set(data.map((d) => d.year))].sort((a, b) => a - b);
-  const weekLabels = [...new Set(data.map((d) => d.weekLabel))].sort(
-    (a, b) => parseInt(a.replace("W", ""), 10) - parseInt(b.replace("W", ""), 10)
-  );
-  const chartData = weekLabels.map((weekLabel) => {
+  const years = Array.from(new Set(data.map((d) => d.year))).sort((a, b) => a - b);
+  const chartData = WEEK_LABELS.map((weekLabel) => {
     const row: Record<string, string | number> = { weekLabel };
     years.forEach((y) => {
       const pt = data.find((d) => d.weekLabel === weekLabel && d.year === y);
@@ -41,29 +47,37 @@ export function WeeklyYoYChart({ data }: Props) {
       maximumFractionDigits: 0,
     }).format(n);
 
+  const currentYear = new Date().getFullYear();
+
   return (
-    <div className="card p-5">
-      <h3 className="font-semibold mb-4">YoY weekly sales trend</h3>
-      <div className="h-80">
-        <ResponsiveContainer width="100%" height="100%">
+    <div className="card p-6">
+      <h3 className="text-analytics-navy-primary font-bold text-lg">YoY weekly sales trend</h3>
+      <p className="text-analytics-gray-text text-sm mt-0.5">Year-over-year comparison by week</p>
+      <div className="h-80 mt-4">
+        <ResponsiveContainer width="100%" height="100%" className="print-chart-full">
           <LineChart
             data={chartData}
             margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
             <XAxis
               dataKey="weekLabel"
-              tick={{ fill: "hsl(var(--ink-muted))", fontSize: 11 }}
+              tick={{ fill: "#4A5568", fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
             />
             <YAxis
-              tick={{ fill: "hsl(var(--ink-muted))", fontSize: 11 }}
+              tick={{ fill: "#4A5568", fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
               tickFormatter={(v) => `$${v}`}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: "hsl(var(--surface-muted))",
-                border: "1px solid rgba(255,255,255,0.1)",
+                backgroundColor: TOOLTIP_BG,
+                border: `1px solid ${TOOLTIP_BORDER}`,
                 borderRadius: "8px",
+                color: "#fff",
               }}
               formatter={(value: number) => [formatCurrency(value), "Sales"]}
             />
@@ -79,6 +93,7 @@ export function WeeklyYoYChart({ data }: Props) {
                 name={`y${y}`}
                 stroke={COLORS[i % COLORS.length]}
                 strokeWidth={2}
+                strokeDasharray={y < currentYear ? "5 5" : undefined}
                 dot={false}
               />
             ))}
