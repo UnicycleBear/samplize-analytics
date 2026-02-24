@@ -43,10 +43,30 @@ export function getShopifyConfig(): ShopifyConfig | null {
 }
 
 const MTD_LY_FIELDS =
-  "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status";
+  "id,created_at,current_total_price,financial_status,cancel_reason";
 
 const RECENT_ORDER_FIELDS =
-  "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status,cancel_reason,customer,refunds";
+  "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status,cancel_reason,customer";
+
+// Minimal fields needed for weekly revenue aggregation
+const WEEKLY_FIELDS = "id,created_at,current_total_price,financial_status,cancel_reason";
+
+export async function fetchWeeklyOrdersViaRest(
+  startYear: number
+): Promise<{ createdAt: string; totalPrice: number }[]> {
+  const config = getShopifyConfig();
+  if (!config) throw new Error("Shopify config missing");
+  const min = `${startYear}-01-01T00:00:00Z`;
+  const max = new Date().toISOString();
+  console.log("[shopify] fetchWeeklyOrdersViaRest range:", { min, max });
+  const orders = await fetchAllOrders(config, min, max, WEEKLY_FIELDS);
+  return orders
+    .filter((o) => o.financial_status !== "voided" && (o as { cancel_reason?: string | null }).cancel_reason == null)
+    .map((o) => ({
+      createdAt: o.created_at,
+      totalPrice: parseFloat(String(o.current_total_price || "0")) || 0,
+    }));
+}
 
 function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
   const totalPrice = parseFloat(String(o.current_total_price || "0").replace(/[^0-9.-]/g, "")) || 0;
@@ -73,7 +93,6 @@ function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
     financialStatus: (o.financial_status ?? "").toLowerCase(),
     cancelReason: o.cancel_reason ?? null,
     customerId: o.customer ? String(o.customer.id) : null,
-    hasRefund: Array.isArray(o.refunds) && o.refunds.length > 0,
   };
 }
 
@@ -94,7 +113,7 @@ export async function fetchRecentOrdersViaRest(): Promise<RecentOrder[]> {
 
   const today = new Date();
   const start = new Date(today);
-  start.setDate(today.getDate() - 65);
+  start.setDate(today.getDate() - 25);
   const min = start.toISOString().split("T")[0] + "T00:00:00Z";
   const max = today.toISOString().split("T")[0] + "T23:59:59Z";
 

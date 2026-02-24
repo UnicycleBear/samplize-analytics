@@ -55,11 +55,9 @@ export type StoreMetrics = {
   weeklySalesByYear: { year: number; weekLabel: string; total: number }[];
 
   top10Products: TopProductRow[];
-  refundRatePercent: number;
   repeatCustomerRatePercent: number;
   ordersPerDayMtd: number;
-  grossRevenueMtd: number;
-  netRevenueMtd: number;
+  revenueMtd: number;
 };
 
 /** Map Shopify source_name to display channel. */
@@ -76,11 +74,6 @@ function channelDisplayName(sourceName: string | null | undefined): string {
 
 function isCancelledRecent(o: RecentOrder): boolean {
   return o.cancelReason != null && o.cancelReason !== "";
-}
-
-function isRefundedRecent(o: RecentOrder): boolean {
-  const s = o.financialStatus.toLowerCase();
-  return s === "refunded" || s === "partially_refunded";
 }
 
 /**
@@ -182,14 +175,7 @@ export function computeMetricsFromRecentOrders(
   const change = (cur: number, prev: number) =>
     prev > 0 ? ((cur - prev) / prev) * 100 : cur > 0 ? 100 : 0;
 
-  const grossRevenueMtd = ordersMtd.reduce((s, o) => s + o.totalPrice, 0);
-  const refundedRevenueMtd = ordersMtd
-    .filter((o) => o.hasRefund || isRefundedRecent(o))
-    .reduce((s, o) => s + o.totalPrice, 0);
-  const netRevenueMtd = grossRevenueMtd - refundedRevenueMtd;
-
-  const refundedCountMtd = ordersMtd.filter((o) => o.hasRefund ?? isRefundedRecent(o)).length;
-  const refundRatePercent = ordersMtd.length > 0 ? (refundedCountMtd / ordersMtd.length) * 100 : 0;
+  const revenueMtd = ordersMtd.reduce((s, o) => s + o.totalPrice, 0);
 
   // New vs repeat from within-dataset: first order date per customer (in our 65-day window)
   const monthStartStr = format(monthStart, "yyyy-MM-dd");
@@ -279,10 +265,8 @@ export function computeMetricsFromRecentOrders(
     dailySales,
     weeklySalesByYear: [],
     top10Products,
-    refundRatePercent,
     repeatCustomerRatePercent,
     ordersPerDayMtd,
-    grossRevenueMtd,
-    netRevenueMtd,
+    revenueMtd,
   };
 }

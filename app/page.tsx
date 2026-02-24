@@ -132,7 +132,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!fastPolling) return;
-    fastPollIntervalRef.current = setInterval(loadFast, 10_000);
+    fastPollIntervalRef.current = setInterval(loadFast, 2_000);
     return () => {
       if (fastPollIntervalRef.current) {
         clearInterval(fastPollIntervalRef.current);
@@ -145,41 +145,12 @@ export default function DashboardPage() {
     setWeeklyError(null);
     try {
       const res = await fetch("/api/analytics/weekly", { cache: "no-store" });
-      const contentType = res.headers.get("content-type") ?? "";
-      if (contentType.includes("application/json")) {
-        const data: WeeklyResponse = await res.json();
-        setWeeklyData(data);
-      } else if (contentType.includes("text/event-stream")) {
-        const reader = res.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-            for (const line of lines) {
-              if (line.startsWith("data:")) {
-                try {
-                  const payload = JSON.parse(line.slice(5).trim());
-                  if (payload.stage === "done") {
-                    setWeeklyData({
-                      weeklySalesByYear: payload.weeklySalesByYear ?? [],
-                      cachedAt: payload.cachedAt ?? new Date().toISOString(),
-                    });
-                    break;
-                  }
-                  if (payload.stage === "error") {
-                    throw new Error(payload.error);
-                  }
-                } catch (_) {}
-              }
-            }
-          }
-        }
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error((b as { error?: string }).error || res.statusText);
       }
+      const data: WeeklyResponse = await res.json();
+      setWeeklyData(data);
     } catch (e) {
       setWeeklyError(e instanceof Error ? e.message : "Failed to load weekly");
     } finally {
@@ -190,10 +161,8 @@ export default function DashboardPage() {
   useEffect(() => {
     setFastLoading(true);
     setWeeklyLoading(true);
-    (async () => {
-      await loadFast();
-      await loadWeekly();
-    })();
+    loadFast();
+    loadWeekly();
   }, [loadFast, loadWeekly]);
 
   const handleRefresh = async () => {
@@ -204,8 +173,8 @@ export default function DashboardPage() {
       setWeeklyLoading(true);
       setFastData(null);
       setWeeklyData(null);
-      await loadFast();
-      await loadWeekly();
+      loadFast();
+      loadWeekly();
     } finally {
       setRefreshLoading(false);
     }
@@ -286,7 +255,7 @@ export default function DashboardPage() {
           <div className="card p-8 max-w-md flex flex-col items-center gap-4">
             <span className="inline-block w-10 h-10 border-4 border-analytics-teal-accent/30 border-t-analytics-teal-accent rounded-full animate-spin" />
             <p className="text-analytics-navy-primary font-medium">Loading dashboard data…</p>
-            <p className="text-sm text-analytics-gray-text">Checking every 10 seconds.</p>
+            <p className="text-sm text-analytics-gray-text">Checking every 2 seconds.</p>
           </div>
         )}
 
@@ -344,11 +313,6 @@ export default function DashboardPage() {
                     format="percent"
                   />
                   <MetricCard
-                    title="Refund rate MTD"
-                    value={metrics.refundRatePercent}
-                    format="percent"
-                  />
-                  <MetricCard
                     title="Repeat customer rate MTD"
                     value={metrics.repeatCustomerRatePercent}
                     format="percent"
@@ -357,8 +321,7 @@ export default function DashboardPage() {
                     title="Orders per day (MTD avg)"
                     value={metrics.ordersPerDayMtd.toFixed(1)}
                   />
-                  <MetricCard title="Gross revenue MTD" value={metrics.grossRevenueMtd} format="currency" />
-                  <MetricCard title="Net revenue MTD" value={metrics.netRevenueMtd} format="currency" />
+                  <MetricCard title="Revenue MTD" value={metrics.revenueMtd} format="currency" />
                 </div>
               )}
             </section>

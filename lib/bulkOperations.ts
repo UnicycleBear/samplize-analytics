@@ -51,7 +51,6 @@ export type RecentOrder = {
   financialStatus: string;
   cancelReason: string | null;
   customerId: string | null;
-  hasRefund: boolean;
 };
 
 export type WeeklyRevenue = {
@@ -532,7 +531,6 @@ export async function downloadAndParseRecentOrdersJSONL(
     const financialStatus = (node.displayFinancialStatus ?? node.financialStatus ?? "").toString().toLowerCase();
     const customer = node.customer as { id?: unknown } | undefined;
     const customerId = customer?.id != null ? String(customer.id) : null;
-    const hasRefund = (Array.isArray(node.refunds) ? node.refunds.length : 0) > 0;
     const cancelReason =
       (node.cancelReason ?? node.cancel_reason) != null
         ? String(node.cancelReason ?? node.cancel_reason).trim() || null
@@ -548,7 +546,6 @@ export async function downloadAndParseRecentOrdersJSONL(
       financialStatus,
       cancelReason,
       customerId,
-      hasRefund,
     });
   }
   return rows;
