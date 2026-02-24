@@ -43,7 +43,7 @@ export function getShopifyConfig(): ShopifyConfig | null {
 }
 
 const MTD_LY_FIELDS =
-  "id,created_at,current_total_price,financial_status,cancel_reason";
+  "id,created_at,total_price,financial_status,cancel_reason";
 
 const RECENT_ORDER_FIELDS =
   "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status,cancel_reason,customer";
@@ -69,7 +69,7 @@ export async function fetchWeeklyOrdersViaRest(
 }
 
 function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
-  const totalPrice = parseFloat(String(o.current_total_price || "0").replace(/[^0-9.-]/g, "")) || 0;
+  const totalPrice = parseFloat(String(o.current_total_price ?? o.total_price ?? "0").replace(/[^0-9.-]/g, "")) || 0;
   const lineItems = (o.line_items || []).map((li) => {
     const title = (li.title ?? "Unknown").trim() || "Unknown";
     const qty = li.quantity ?? 0;
@@ -126,8 +126,8 @@ export async function fetchRecentOrdersViaRest(): Promise<RecentOrder[]> {
 export type ShopifyOrder = {
   id: number;
   created_at: string;
-  current_total_price: string;
-  total_price: string;
+  current_total_price?: string;
+  total_price?: string;
   currency: string;
   source_name: string | null;
   billing_address: { country_code: string } | null;
@@ -218,6 +218,7 @@ export async function fetchOrders(
     ? { page_info: pageInfo }
     : {
         status: "any",
+        limit: "250",
         created_at_min: createdAtMin,
         created_at_max: createdAtMax,
         fields: fields ?? ORDER_FIELDS,

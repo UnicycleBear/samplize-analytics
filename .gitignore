@@ -140,3 +140,5 @@ vite.config.ts.timestamp-*
 
 # Disk cache
 data/
+.vercel
+.env*.local
