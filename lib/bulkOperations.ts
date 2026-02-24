@@ -597,12 +597,22 @@ export async function fetchWeeklyRevenueViaBulk(): Promise<WeeklyRevenue[]> {
 }
 
 /**
- * Fetches orders for the last 65 days. Delegates to REST (shopify.fetchRecentOrdersViaRest).
+ * Fetches orders for the last 65 days via GraphQL bulk operation.
  */
 export async function fetchRecentOrdersViaBulk(_recursed = false): Promise<RecentOrder[]> {
-  const { fetchRecentOrdersViaRest } = await import("./shopify");
-  console.log("[bulkPoller] fetchRecentOrdersViaBulk → delegating to REST");
-  return fetchRecentOrdersViaRest();
+  const { subDays, format } = await import("date-fns");
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const start = subDays(today, 65);
+  const startDate = format(start, "yyyy-MM-dd");
+  const endDate = format(today, "yyyy-MM-dd");
+  console.log("[bulk] fetchRecentOrdersViaBulk: starting bulk op", { startDate, endDate });
+  await startRecentOrdersBulkOperation(startDate, endDate);
+  const downloadUrl = await pollBulkOperation();
+  if (!downloadUrl) {
+    return [];
+  }
+  return downloadAndParseRecentOrdersJSONL(downloadUrl);
 }
 
 /**
