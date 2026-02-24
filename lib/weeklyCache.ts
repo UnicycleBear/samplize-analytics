@@ -89,7 +89,8 @@ export async function refreshWeeklyCache(): Promise<WeeklyCachePayload> {
   const { getISOWeek, getISOWeekYear } = await import("date-fns");
 
   const weekly = await fetchWeeklyRevenueViaBulk();
-  const years = [2024, 2025, 2026];
+  const currentYear = new Date().getFullYear();
+  const years = [currentYear - 2, currentYear - 1, currentYear];
   const byYearWeekNum: Record<number, Record<number, number>> = {};
   years.forEach((y) => {
     byYearWeekNum[y] = {};

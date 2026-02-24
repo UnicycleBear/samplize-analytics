@@ -8,9 +8,8 @@ export const revalidate = 0;
 export async function POST() {
   clearOrdersCache();
   triggerBulkFetchNow();
-  const payload = await refreshWeeklyCache();
-  return Response.json({
-    success: true,
-    updatedAt: payload.cachedAt,
-  });
+  refreshWeeklyCache().catch((e) =>
+    console.error("[refresh-cache] weekly refresh error:", e)
+  );
+  return Response.json({ success: true, updatedAt: new Date().toISOString() });
 }

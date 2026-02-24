@@ -45,6 +45,9 @@ export function getShopifyConfig(): ShopifyConfig | null {
 const MTD_LY_FIELDS =
   "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status";
 
+const RECENT_ORDER_FIELDS =
+  "id,created_at,current_total_price,line_items,shipping_address,source_name,financial_status,cancel_reason,customer,refunds";
+
 function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
   const totalPrice = parseFloat(String(o.current_total_price || "0").replace(/[^0-9.-]/g, "")) || 0;
   const lineItems = (o.line_items || []).map((li) => {
@@ -68,8 +71,9 @@ function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
     shippingCountryCode: (o.shipping_address?.country_code ?? "").toUpperCase(),
     sourceName: (o.source_name ?? "").trim() || "",
     financialStatus: (o.financial_status ?? "").toLowerCase(),
-    customerId: null,
-    hasRefund: false,
+    cancelReason: o.cancel_reason ?? null,
+    customerId: o.customer ? String(o.customer.id) : null,
+    hasRefund: Array.isArray(o.refunds) && o.refunds.length > 0,
   };
 }
 
@@ -95,7 +99,7 @@ export async function fetchRecentOrdersViaRest(): Promise<RecentOrder[]> {
   const max = today.toISOString().split("T")[0] + "T23:59:59Z";
 
   console.log("[shopify] fetchRecentOrdersViaRest date range:", { min, max });
-  const orders = await fetchAllOrders(config, min, max, MTD_LY_FIELDS);
+  const orders = await fetchAllOrders(config, min, max, RECENT_ORDER_FIELDS);
   return orders.map(shopifyOrderToRecent);
 }
 
@@ -109,12 +113,14 @@ export type ShopifyOrder = {
   billing_address: { country_code: string } | null;
   shipping_address: { country_code: string } | null;
   financial_status: string | null;
+  cancel_reason?: string | null;
   line_items: Array<{
     quantity: number;
     title?: string;
     price?: string;
   }>;
   customer?: { id: number } | null;
+  refunds?: Array<{ id: number }>;
 };
 
 export type ShopifyCustomer = {

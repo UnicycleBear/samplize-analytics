@@ -75,8 +75,7 @@ function channelDisplayName(sourceName: string | null | undefined): string {
 }
 
 function isCancelledRecent(o: RecentOrder): boolean {
-  const s = o.financialStatus.toLowerCase();
-  return s === "cancelled" || s === "canceled";
+  return o.cancelReason != null && o.cancelReason !== "";
 }
 
 function isRefundedRecent(o: RecentOrder): boolean {
@@ -184,7 +183,10 @@ export function computeMetricsFromRecentOrders(
     prev > 0 ? ((cur - prev) / prev) * 100 : cur > 0 ? 100 : 0;
 
   const grossRevenueMtd = ordersMtd.reduce((s, o) => s + o.totalPrice, 0);
-  const netRevenueMtd = salesMtd;
+  const refundedRevenueMtd = ordersMtd
+    .filter((o) => o.hasRefund || isRefundedRecent(o))
+    .reduce((s, o) => s + o.totalPrice, 0);
+  const netRevenueMtd = grossRevenueMtd - refundedRevenueMtd;
 
   const refundedCountMtd = ordersMtd.filter((o) => o.hasRefund ?? isRefundedRecent(o)).length;
   const refundRatePercent = ordersMtd.length > 0 ? (refundedCountMtd / ordersMtd.length) * 100 : 0;

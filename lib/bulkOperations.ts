@@ -49,6 +49,7 @@ export type RecentOrder = {
   shippingCountryCode: string;
   sourceName: string;
   financialStatus: string;
+  cancelReason: string | null;
   customerId: string | null;
   hasRefund: boolean;
 };
@@ -354,7 +355,12 @@ export async function pollBulkOperation(): Promise<string> {
     }
   `;
   const url = `https://${domain}/admin/api/${API_VERSION}/graphql.json`;
+  const TIMEOUT_MS = 3 * 60 * 1000;
+  const deadline = Date.now() + TIMEOUT_MS;
   for (;;) {
+    if (Date.now() > deadline) {
+      throw new Error("[bulk] pollBulkOperation timed out after 3 minutes");
+    }
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -526,7 +532,11 @@ export async function downloadAndParseRecentOrdersJSONL(
     const financialStatus = (node.displayFinancialStatus ?? node.financialStatus ?? "").toString().toLowerCase();
     const customer = node.customer as { id?: unknown } | undefined;
     const customerId = customer?.id != null ? String(customer.id) : null;
-    const hasRefund = (node.refunds?.length ?? 0) > 0;
+    const hasRefund = (Array.isArray(node.refunds) ? node.refunds.length : 0) > 0;
+    const cancelReason =
+      (node.cancelReason ?? node.cancel_reason) != null
+        ? String(node.cancelReason ?? node.cancel_reason).trim() || null
+        : null;
 
     rows.push({
       id,
@@ -536,6 +546,7 @@ export async function downloadAndParseRecentOrdersJSONL(
       shippingCountryCode,
       sourceName,
       financialStatus,
+      cancelReason,
       customerId,
       hasRefund,
     });

@@ -223,7 +223,7 @@ export default function DashboardPage() {
   const weeklyCachedAt = weeklyData?.cachedAt ?? null;
   const lastUpdatedAt =
     ordersCachedAt && weeklyCachedAt
-      ? new Date(ordersCachedAt) < new Date(weeklyCachedAt)
+      ? new Date(ordersCachedAt) > new Date(weeklyCachedAt)
         ? ordersCachedAt
         : weeklyCachedAt
       : ordersCachedAt ?? weeklyCachedAt;
