@@ -84,6 +84,21 @@ export async function fetchMtdLyOrdersViaRest(config: ShopifyConfig): Promise<Re
   return orders.map(shopifyOrderToRecent);
 }
 
+export async function fetchRecentOrdersViaRest(): Promise<RecentOrder[]> {
+  const config = getShopifyConfig();
+  if (!config) throw new Error("Shopify config missing (SAMPLIZE_STORE_URL / SAMPLIZE_API_KEY)");
+
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(today.getDate() - 65);
+  const min = start.toISOString().split("T")[0] + "T00:00:00Z";
+  const max = today.toISOString().split("T")[0] + "T23:59:59Z";
+
+  console.log("[shopify] fetchRecentOrdersViaRest date range:", { min, max });
+  const orders = await fetchAllOrders(config, min, max, MTD_LY_FIELDS);
+  return orders.map(shopifyOrderToRecent);
+}
+
 export type ShopifyOrder = {
   id: number;
   created_at: string;

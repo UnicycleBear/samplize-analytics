@@ -580,51 +580,12 @@ export async function fetchWeeklyRevenueViaBulk(): Promise<WeeklyRevenue[]> {
 }
 
 /**
- * Fetches orders for the last 65 days via bulk operation (covers current + prior month for MoM).
- * Never reuses COMPLETED ops — always start fresh so we get the current query (lineItems, etc.).
- * Only reuses RUNNING/CREATED so we don't start duplicates.
+ * Fetches orders for the last 65 days. Delegates to REST (shopify.fetchRecentOrdersViaRest).
  */
-export async function fetchRecentOrdersViaBulk(recursed = false): Promise<RecentOrder[]> {
-  const { subDays, format } = await import("date-fns");
-  const now = new Date();
-  const endDate = format(now, "yyyy-MM-dd");
-  const startDate = format(subDays(now, 65), "yyyy-MM-dd");
-
-  const current = await getCurrentBulkOperation();
-  const status = current.status ?? "";
-
-  let downloadUrl: string;
-  if (status === "RUNNING" || status === "CREATED") {
-    downloadUrl = await pollBulkOperation();
-  } else {
-    await cancelCurrentBulkOp();
-    try {
-      await startRecentOrdersBulkOperation(startDate, endDate);
-      downloadUrl = await pollBulkOperation();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("already in progress")) {
-        downloadUrl = await pollBulkOperation();
-      } else {
-        throw e;
-      }
-    }
-  }
-
-  if (!downloadUrl) {
-    return [];
-  }
-  const orders = await downloadAndParseRecentOrdersJSONL(downloadUrl);
-  console.log("[bulk] parsed orders count:", orders.length, "first order lineItems count:", orders[0]?.lineItems?.length);
-  if (orders.length === 0 || orders[0]?.lineItems?.length === 0) {
-    if (recursed) {
-      throw new Error("[bulk] Stale bulk op (no lineItems) still present after retry; cache not updated");
-    }
-    console.log("[bulk] stale bulk op detected - canceling and starting fresh");
-    await cancelCurrentBulkOp();
-    return fetchRecentOrdersViaBulk(true);
-  }
-  return orders;
+export async function fetchRecentOrdersViaBulk(_recursed = false): Promise<RecentOrder[]> {
+  const { fetchRecentOrdersViaRest } = await import("./shopify");
+  console.log("[bulkPoller] fetchRecentOrdersViaBulk → delegating to REST");
+  return fetchRecentOrdersViaRest();
 }
 
 /**
