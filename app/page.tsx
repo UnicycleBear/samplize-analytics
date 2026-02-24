@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { StoreMetrics } from "@/lib/analytics";
 import { MetricCard } from "@/components/MetricCard";
-import { SalesChannelTable } from "@/components/SalesChannelTable";
 import { DailySalesChart } from "@/components/DailySalesChart";
 import { WeeklyYoYChart } from "@/components/WeeklyYoYChart";
 import { TopProductsTable } from "@/components/TopProductsTable";
@@ -323,15 +322,6 @@ export default function DashboardPage() {
                   />
                   <MetricCard title="Revenue MTD" value={metrics.revenueMtd} format="currency" />
                 </div>
-              )}
-            </section>
-
-            <section>
-              <SectionHeader title="Revenue by sales channel (MoM)" />
-              {fastLoading && !fastData ? (
-                <SkeletonTable />
-              ) : (
-                <SalesChannelTable rows={metrics.salesByChannel} />
               )}
             </section>
 

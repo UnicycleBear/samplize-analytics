@@ -93,6 +93,7 @@ function shopifyOrderToRecent(o: ShopifyOrder): RecentOrder {
     financialStatus: (o.financial_status ?? "").toLowerCase(),
     cancelReason: o.cancel_reason ?? null,
     customerId: o.customer ? String(o.customer.id) : null,
+    customerCreatedAt: o.customer?.created_at ?? null,
   };
 }
 
@@ -138,7 +139,7 @@ export type ShopifyOrder = {
     title?: string;
     price?: string;
   }>;
-  customer?: { id: number } | null;
+  customer?: { id: number; created_at?: string } | null;
   refunds?: Array<{ id: number }>;
 };
 

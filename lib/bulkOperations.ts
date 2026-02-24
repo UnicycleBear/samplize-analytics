@@ -51,6 +51,7 @@ export type RecentOrder = {
   financialStatus: string;
   cancelReason: string | null;
   customerId: string | null;
+  customerCreatedAt: string | null;
 };
 
 export type WeeklyRevenue = {
@@ -259,6 +260,12 @@ function getRecentOrdersBulkQueryString(startDate: string, endDate: string): str
                 shippingAddress {
                   countryCodeV2
                 }
+                customer {
+                  id
+                  createdAt
+                }
+                displayFinancialStatus
+                cancelReason
                 lineItems(first: 250) {
                   edges {
                     node {
@@ -529,8 +536,9 @@ export async function downloadAndParseRecentOrdersJSONL(
     const shippingCountryCode = (addr?.countryCodeV2 ?? "").toString().toUpperCase().trim() || "";
     const sourceName = (node.sourceName ?? node.source_name ?? "").toString().trim() || "";
     const financialStatus = (node.displayFinancialStatus ?? node.financialStatus ?? "").toString().toLowerCase();
-    const customer = node.customer as { id?: unknown } | undefined;
+    const customer = node.customer as { id?: unknown; createdAt?: string } | undefined;
     const customerId = customer?.id != null ? String(customer.id) : null;
+    const customerCreatedAt = customer?.createdAt != null ? String(customer.createdAt) : null;
     const cancelReason =
       (node.cancelReason ?? node.cancel_reason) != null
         ? String(node.cancelReason ?? node.cancel_reason).trim() || null
@@ -546,6 +554,7 @@ export async function downloadAndParseRecentOrdersJSONL(
       financialStatus,
       cancelReason,
       customerId,
+      customerCreatedAt,
     });
   }
   return rows;

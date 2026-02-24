@@ -177,20 +177,12 @@ export function computeMetricsFromRecentOrders(
 
   const revenueMtd = ordersMtd.reduce((s, o) => s + o.totalPrice, 0);
 
-  // New vs repeat from within-dataset: first order date per customer (in our 65-day window)
-  const monthStartStr = format(monthStart, "yyyy-MM-dd");
-  const firstOrderDateByCustomerId = new Map<string, string>();
-  orders.forEach((o) => {
-    if (!o.customerId) return;
-    const d = format(orderDate(o), "yyyy-MM-dd");
-    const existing = firstOrderDateByCustomerId.get(o.customerId);
-    if (existing == null || d < existing) firstOrderDateByCustomerId.set(o.customerId, d);
-  });
-  const newCustomersMtdCount = ordersMtd.filter(
-    (o) => o.customerId && (firstOrderDateByCustomerId.get(o.customerId) ?? "") >= monthStartStr
-  ).length;
+  // Repeat = customer whose account was created before this month (true cross-history signal)
   const repeatOrdersMtdCount = ordersMtd.filter(
-    (o) => o.customerId && (firstOrderDateByCustomerId.get(o.customerId) ?? "") < monthStartStr
+    (o) => o.customerCreatedAt && parseISO(o.customerCreatedAt) < monthStart
+  ).length;
+  const newCustomersMtdCount = ordersMtd.filter(
+    (o) => o.customerCreatedAt && parseISO(o.customerCreatedAt) >= monthStart
   ).length;
   const repeatCustomerRatePercent = ordersMtd.length > 0 ? (repeatOrdersMtdCount / ordersMtd.length) * 100 : 0;
 
@@ -215,12 +207,12 @@ export function computeMetricsFromRecentOrders(
     .slice(0, 10);
 
   const dailySalesMap: Record<string, number> = {};
-  eachDayOfInterval({ start: trailing30Start, end: yesterday }).forEach((d) => {
+  eachDayOfInterval({ start: trailing30Start, end: today }).forEach((d) => {
     dailySalesMap[format(d, "yyyy-MM-dd")] = 0;
   });
   ordersLast30.forEach((o) => {
     const d = orderDate(o);
-    if (d >= trailing30Start && d <= yesterday) {
+    if (d >= trailing30Start && d <= today) {
       const key = format(d, "yyyy-MM-dd");
       dailySalesMap[key] = (dailySalesMap[key] || 0) + o.totalPrice;
     }
